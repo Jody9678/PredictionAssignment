@@ -1,0 +1,185 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Jody9678"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+###Install and load the required libraries:
+
+```{r}
+library(ggplot2)
+library(caret)
+```
+
+###Load the training and testing data:
+
+```{r}
+data_train = read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+data_test = read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+
+```{r}
+head(data_train, 10)
+```
+
+###Check the variables:
+
+```{r}
+names(data_train)
+```
+
+```{r}
+ggplot(data=data_train)+
+  geom_bar(mapping= aes(x=classe, fill=user_name), position='fill')
+
+ggplot(data=data_train)+
+  geom_point(mapping = aes(x = as.numeric(row.names(data_train)), y = pitch_belt, color=classe), alpha=0.5)
+```
+
+The different values of "classe" are clustered; likely due to the way the data was collected or stored. On inspection, the "X" variable appears to correspond to row number:
+
+```{r}
+ggplot(data=data_train)+
+  geom_point(mapping=aes(x=as.numeric(row.names(data_train)),y=X))
+```
+
+To avoid issues related to the above; the data is shuffled and the "X" variable eliminated:
+
+```{r}
+data_train = subset(data_train, select=-c(X))
+
+set.seed(42)
+rows <- sample(nrow(data_train))
+data_train = data_train[rows,]
+rownames(data_train) = NULL
+```
+
+###Overview of testing set:
+
+```{r}
+head(data_train$classe)
+```
+
+```{r}
+names(data_test)
+```
+
+Note that the testing set does not contain the "classe" variable (which we have to model and predict), and contains a "problem id" variable that is not present in the training set. "Problem id" and "x" variable eliminated from the testing set.
+
+```{r}
+data_test = subset(data_test, select = -c(problem_id, X))
+names(data_test)
+```
+
+###Data Cleanup:
+
+#Eliminate high percentage of NaN values:
+
+```{r}
+naCols = which(colMeans(!is.na(data_train)) <= 0.1)
+```
+
+```{r}
+data_train = data_train[, -naCols]
+```
+
+```{r}
+names(data_train)
+```
+
+It is apparent that a lot of variables were filtered out with this requirement. 
+
+#Explore the variability of the remaining variables. 
+Eliminate variables that exhibit variability near zero, since they do not contain valuable information:
+
+```{r}
+noVariance <- nearZeroVar(data_train)
+data_train <- data_train[,-noVariance]
+```
+
+```{r}
+names(data_train)
+```
+
+#Remove extraneous variables from testing set:
+
+```{r}
+data_test = data_test[,-naCols]
+data_test = data_test[,-noVariance]
+```
+
+```{r}
+names(data_test)
+```
+
+###Data modeling: 
+
+#Create a partition of the data into traininig and validation.
+
+```{r}
+set.seed(42)
+inTrain <- createDataPartition(data_train$classe, p=0.7, list=F)
+training_data <- data_train[inTrain,]
+validation_data <- data_train[-inTrain,]
+```
+
+###Generate decision tree:
+
+```{r}
+trainControl <- trainControl(method="cv", number=3, verboseIter=F)
+modelFit1 = train(classe~., data=training_data, method="rpart", trControl = trainControl, tuneLength = 5) 
+```
+
+```{r}
+modelFit1
+```
+
+#Visualize decision tree:
+
+```{r}
+library(rattle)
+```
+
+```{r}
+fancyRpartPlot(modelFit1$finalModel)
+```
+
+#Evaluate the model by predicting with validation data and constructing the confusion matrix:
+
+```{r}
+prediction1 <- predict(modelFit1, validation_data)
+confusionMatrix1 <- confusionMatrix(prediction1, factor(validation_data$classe))
+confusionMatrix1
+```
+
+Based on the validation performance, we expect this model to have about 60% out of sample accuracy.
+
+#Predict using testing set:
+
+```{r}
+predict(modelFit1, data_test)
+```
+
+###Generate random forest, and evaluate its performance on the validation set:
+
+```{r}
+modelFit2 = train(classe~., data=training_data, method="rf", trControl = trainControl, tuneLength = 5)
+modelFit2
+```
+
+```{r}
+prediction2 <- predict(modelFit2, validation_data)
+confusionMatrix2 <- confusionMatrix(prediction2, factor(validation_data$classe))
+confusionMatrix2
+```
+
+Random forest predicted to have 99% accuracy using sample. 
+
+#Use random forest to predict on the test set:
+
+```{r}
+predict(modelFit2, data_test)
+```
+
+Additional analysis and iterations would yield insignificant decimal changes in accuracy over the above model, so we stop the analysis and use random forest for the quiz answers. 
